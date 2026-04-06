@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tee Time Booker — James Baird</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green:      #1a4a2e;
+    --green-mid:  #2d6e47;
+    --green-light:#4a9e6b;
+    --cream:      #f5f0e8;
+    --cream-dark: #ede7d9;
+    --gold:       #c8a84b;
+    --gold-light: #e8c96b;
+    --white:      #fdfaf5;
+    --text:       #1a1a1a;
+    --text-soft:  #4a5568;
+    --red:        #c0392b;
+    --shadow:     0 4px 24px rgba(26,74,46,0.13);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--green);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 0 60px;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(74,158,107,0.18) 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 90%, rgba(200,168,75,0.10) 0%, transparent 50%);
+  }
+
+  /* ── Header ── */
+  header {
+    width: 100%;
+    background: rgba(0,0,0,0.25);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    backdrop-filter: blur(8px);
+  }
+  .logo-icon {
+    font-size: 2rem;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+  }
+  .logo-text h1 {
+    font-family: 'Playfair Display', serif;
+    color: var(--cream);
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.1;
+  }
+  .logo-text p {
+    color: var(--gold);
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  /* ── Main card container ── */
+  .container {
+    width: 100%;
+    max-width: 540px;
+    padding: 28px 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .card {
+    background: var(--white);
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: var(--shadow);
+    border: 1px solid rgba(255,255,255,0.6);
+  }
+
+  /* ── Status card ── */
+  .status-card {
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .status-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--green-mid), var(--gold));
+    border-radius: 20px 20px 0 0;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #e8f5ee;
+    border: 1.5px solid #a8d5b8;
+    color: var(--green);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 100px;
+    margin-bottom: 18px;
+  }
+  .status-badge.idle { background: #f0f4f8; border-color: #cbd5e0; color: #4a5568; }
+  .status-badge.running { background: #fef9e7; border-color: #f9d849; color: #7d6608; }
+  .status-badge.error { background: #fdf0ef; border-color: #f5b7b1; color: var(--red); }
+
+  .pulse {
+    width: 8px; height: 8px;
+    background: currentColor;
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  .status-card h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.7rem;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .status-card .subtitle {
+    color: var(--text-soft);
+    font-size: 0.92rem;
+    margin-bottom: 24px;
+  }
+
+  /* ── Next run countdown ── */
+  .next-run {
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .next-run-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin-bottom: 4px;
+  }
+  .next-run-time {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.2rem;
+    color: var(--green);
+    font-weight: 700;
+  }
+  .countdown {
+    text-align: right;
+  }
+  .countdown-val {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--green-mid);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .countdown-label {
+    font-size: 0.72rem;
+    color: var(--text-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── Book Now button ── */
+  .book-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    background: linear-gradient(135deg, var(--green) 0%, var(--green-mid) 100%);
+    color: var(--cream);
+    border: none;
+    border-radius: 14px;
+    padding: 18px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 16px rgba(26,74,46,0.35);
+    margin-top: 20px;
+    letter-spacing: 0.02em;
+    position: relative;
+    overflow: hidden;
+  }
+  .book-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .book-btn:hover::after { opacity: 1; }
+  .book-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(26,74,46,0.4); }
+  .book-btn:active { transform: translateY(0); }
+  .book-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .book-btn .spinner {
+    width: 18px; height: 18px;
+    border: 2.5px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: none;
+  }
+  .book-btn.loading .spinner { display: block; }
+  .book-btn.loading .btn-text { opacity: 0.7; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Last result card ── */
+  .result-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .result-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--cream-dark);
+    font-size: 0.9rem;
+    gap: 12px;
+  }
+  .result-item:last-child { border-bottom: none; }
+  .result-item .label { color: var(--text-soft); font-weight: 400; }
+  .result-item .value { color: var(--text); font-weight: 600; text-align: right; }
+  .result-item .value.success { color: var(--green-mid); }
+  .result-item .value.fail { color: var(--red); }
+  .result-item .value.pending { color: #b7791f; }
+
+  /* ── Log card ── */
+  .log-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .log-toggle {
+    font-size: 0.78rem;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    color: var(--green-mid);
+    cursor: pointer;
+    background: none;
+    border: none;
+    letter-spacing: 0.05em;
+  }
+  .log-box {
+    background: #0f1e14;
+    border-radius: 10px;
+    padding: 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.76rem;
+    line-height: 1.7;
+    color: #7ec89a;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+  }
+  .log-box.open { display: block; }
+  .log-box .log-time { color: #4a7a5a; }
+  .log-box .log-info { color: #7ec89a; }
+  .log-box .log-warn { color: #f6c90e; }
+  .log-box .log-err  { color: #e57373; }
+  .log-box .log-ok   { color: #69f0ae; font-weight: bold; }
+
+  /* ── Settings card ── */
+  .settings-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    color: var(--text);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--cream-dark);
+    font-size: 0.9rem;
+    gap: 12px;
+  }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { color: var(--text-soft); }
+  .setting-value {
+    font-weight: 600;
+    color: var(--text);
+    background: var(--cream);
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 32px;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.75rem;
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Toast notification ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--green);
+    color: var(--cream);
+    padding: 14px 24px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { background: var(--red); }
+
+  /* Mobile tweaks */
+  @media (max-width: 420px) {
+    .card { padding: 22px 18px; }
+    .status-card h2 { font-size: 1.4rem; }
+    header { padding: 16px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-icon">⛳</div>
+  <div class="logo-text">
+    <h1>Tee Time Booker</h1>
+    <p>James Baird Golf Course</p>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Status Card -->
+  <div class="card status-card">
+    <div class="status-badge idle" id="statusBadge">
+      <div class="pulse"></div>
+      <span id="statusText">Ready</span>
+    </div>
+
+    <h2 id="statusHeading">All Set</h2>
+    <p class="subtitle" id="statusSubtitle">Your tee time will be booked automatically this Friday.</p>
+
+    <div class="next-run">
+      <div>
+        <div class="next-run-label">Next auto-booking</div>
+        <div class="next-run-time" id="nextRunTime">Friday at 6:59 PM</div>
+      </div>
+      <div class="countdown">
+        <div class="countdown-val" id="countdown">—</div>
+        <div class="countdown-label">until booking</div>
+      </div>
+    </div>
+
+    <button class="book-btn" id="bookBtn" onclick="triggerBooking()">
+      <div class="spinner"></div>
+      <span class="btn-text">⛳ Book Right Now (Manual)</span>
+    </button>
+  </div>
+
+  <!-- Last Result Card -->
+  <div class="card result-card">
+    <h3>📋 Last Booking Attempt</h3>
+    <div class="result-item">
+      <span class="label">Date run</span>
+      <span class="value" id="lastRunDate">Never</span>
+    </div>
+    <div class="result-item">
+      <span class="label">Target Saturday</span>
+      <span class="value" id="lastTargetDate">—</span>
+    </div>
+    <div class="result-item">
+      <span class="label">Result</span>
+      <span class="value pending" id="lastResult">No runs yet</span>
+    </div>
+    <div class="result-item">
+      <span class="label">Time booked</span>
+      <span class="value" id="lastTimeBooked">—</span>
+    </div>
+  </div>
+
+  <!-- Log Card -->
+  <div class="card log-card">
+    <h3>
+      🖥 Activity Log
+      <button class="log-toggle" onclick="toggleLog()" id="logToggleBtn">Show log</button>
+    </h3>
+    <div class="log-box" id="logBox">
+      <div><span class="log-time">Waiting for first run...</span></div>
+    </div>
+  </div>
+
+  <!-- Settings Card -->
+  <div class="card settings-card">
+    <h3>⚙️ Settings</h3>
+    <div class="setting-row">
+      <span class="setting-label">Course</span>
+      <span class="setting-value">James Baird</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Players</span>
+      <span class="setting-value">4</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Time window</span>
+      <span class="setting-value">8:00 – 10:00 AM</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Runs every</span>
+      <span class="setting-value">Friday 6:59 PM</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Notification</span>
+      <span class="setting-value">Text message ✓</span>
+    </div>
+  </div>
+
+</div>
+
+<footer>James Baird Golf Course · Auto-Booker v1.0</footer>
+
+<div class="toast" id="toast">
+  <span id="toastIcon">✓</span>
+  <span id="toastMsg">Booking started!</span>
+</div>
+
+<script>
+  // ── Countdown to next Friday 6:59 PM ──────────────────────────────────────
+  function getNextFriday659() {
+    const now = new Date();
+    const result = new Date(now);
+    // Day 5 = Friday
+    const day = now.getDay();
+    let daysUntilFriday = (5 - day + 7) % 7;
+    if (daysUntilFriday === 0) {
+      // It's Friday — check if 6:59 PM has passed
+      const cutoff = new Date(now);
+      cutoff.setHours(18, 59, 0, 0);
+      if (now >= cutoff) daysUntilFriday = 7;
+    }
+    result.setDate(now.getDate() + daysUntilFriday);
+    result.setHours(18, 59, 0, 0);
+    return result;
+  }
+
+  function formatCountdown(ms) {
+    if (ms <= 0) return "Now!";
+    const totalSec = Math.floor(ms / 1000);
+    const d = Math.floor(totalSec / 86400);
+    const h = Math.floor((totalSec % 86400) / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    return `${m}m ${s}s`;
+  }
+
+  function updateCountdown() {
+    const target = getNextFriday659();
+    const now = new Date();
+    const diff = target - now;
+    document.getElementById('countdown').textContent = formatCountdown(diff);
+
+    // Show the date of the next Friday
+    const opts = { weekday: 'long', month: 'short', day: 'numeric' };
+    document.getElementById('nextRunTime').textContent =
+      `${target.toLocaleDateString('en-US', opts)} at 6:59 PM`;
+  }
+  updateCountdown();
+  setInterval(updateCountdown, 1000);
+
+  // ── Status & result management ────────────────────────────────────────────
+  function setStatus(type, heading, subtitle) {
+    const badge = document.getElementById('statusBadge');
+    const text  = document.getElementById('statusText');
+    badge.className = 'status-badge ' + type;
+    text.textContent = { idle: 'Ready', running: 'Running…', error: 'Error', success: 'Booked!' }[type] || type;
+    document.getElementById('statusHeading').textContent = heading;
+    document.getElementById('statusSubtitle').textContent = subtitle;
+  }
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.className = 'toast' + (isError ? ' error' : '');
+    document.getElementById('toastIcon').textContent = isError ? '✗' : '✓';
+    document.getElementById('toastMsg').textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }
+
+  function addLog(text, type = 'info') {
+    const box = document.getElementById('logBox');
+    const now = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    const timeSpan = `<span class="log-time">[${now}]</span> `;
+    const msgSpan  = `<span class="log-${type}">${text}</span>`;
+    line.innerHTML = timeSpan + msgSpan;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function updateResult(date, targetSat, result, timeBooked) {
+    document.getElementById('lastRunDate').textContent = date;
+    document.getElementById('lastTargetDate').textContent = targetSat;
+    const el = document.getElementById('lastResult');
+    el.textContent = result;
+    el.className = 'value ' + (result.toLowerCase().includes('booked') ? 'success' :
+                               result.toLowerCase().includes('fail') || result.toLowerCase().includes('error') ? 'fail' : 'pending');
+    document.getElementById('lastTimeBooked').textContent = timeBooked || '—';
+  }
+
+  // ── Toggle log ────────────────────────────────────────────────────────────
+  function toggleLog() {
+    const box = document.getElementById('logBox');
+    const btn = document.getElementById('logToggleBtn');
+    box.classList.toggle('open');
+    btn.textContent = box.classList.contains('open') ? 'Hide log' : 'Show log';
+  }
+
+  // ── Manual booking trigger ─────────────────────────────────────────────────
+  // This calls the /run endpoint on your Flask server (set up on Oracle)
+  async function triggerBooking() {
+    const btn = document.getElementById('bookBtn');
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.querySelector('.btn-text').textContent = 'Booking in progress…';
+
+    setStatus('running', 'Booking Now…', 'Looking for tee times on Saturday morning…');
+    addLog('Manual booking triggered', 'info');
+    showToast('Booking started — this may take 30–60 seconds.');
+
+    try {
+      // This hits the Flask API running on the same Oracle server
+      const resp = await fetch('/run', { method: 'POST' });
+      const data = await resp.json();
+
+      if (data.success) {
+        setStatus('idle', 'Tee Time Booked! ⛳', `${data.time} on Saturday — confirmation sent to your phone.`);
+        addLog(`✅ BOOKED: ${data.time} on ${data.date}`, 'ok');
+        updateResult(
+          new Date().toLocaleString(),
+          data.date,
+          '✅ Booked!',
+          data.time
+        );
+        showToast(`Booked! ${data.time} on Saturday`);
+      } else {
+        setStatus('error', 'No Times Available', data.message || 'Could not secure a tee time. Try the course website.');
+        addLog('No tee time booked: ' + (data.message || 'unknown reason'), 'warn');
+        updateResult(new Date().toLocaleString(), data.date || '—', '❌ Not booked', '—');
+        showToast(data.message || 'Could not book a tee time.', true);
+      }
+    } catch (err) {
+      setStatus('error', 'Connection Error', 'Could not reach the booking server. Try again.');
+      addLog('Server connection error: ' + err.message, 'err');
+      showToast('Could not reach server.', true);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      btn.querySelector('.btn-text').textContent = '⛳ Book Right Now (Manual)';
+    }
+  }
+
+  // ── Poll server for latest status on page load ─────────────────────────────
+  async function loadStatus() {
+    try {
+      const resp = await fetch('/status');
+      const data = await resp.json();
+      if (data.last_run) {
+        updateResult(data.last_run.ran_at, data.last_run.target_date,
+                     data.last_run.result, data.last_run.time_booked);
+        if (data.last_run.result && data.last_run.result.includes('Booked')) {
+          setStatus('idle', 'Tee Time Booked! ⛳',
+            `Last booked: ${data.last_run.time_booked} on ${data.last_run.target_date}`);
+        }
+      }
+      if (data.log_lines) {
+        const box = document.getElementById('logBox');
+        box.innerHTML = '';
+        data.log_lines.forEach(line => {
+          const div = document.createElement('div');
+          div.textContent = line;
+          box.appendChild(div);
+        });
+      }
+    } catch {
+      // Server might not be up yet — that's fine
+    }
+  }
+  loadStatus();
+</script>
+</body>
+</html>
