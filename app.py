@@ -1,85 +1,157 @@
 """
-Golf Booker — Flask Backend
-Serves the settings UI and exposes API endpoints the frontend calls to
-read and write config.json. The booking bot reads the same config.json.
+server.py — Flask web server for the Tee Time Booker
+=====================================================
+Serves the dashboard page and exposes two API endpoints:
+  GET  /status  → returns last run info + recent log lines
+  POST /run     → triggers an immediate booking attempt
 
-Run:
-    python app.py
-Then open http://localhost:5000 in a browser.
+Run with:  python server.py
 """
 
-from flask import Flask, jsonify, request, render_template
-import json, os, logging
+from flask import Flask, jsonify, send_from_directory, request
+import threading
+import subprocess
+import json
+import os
+import re
+from datetime import datetime
 
-app = Flask(__name__)
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
+app = Flask(__name__, static_folder=".")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
+STATUS_FILE = "last_run.json"   # persists last booking result
+LOG_FILE    = "booker.log"
+SCRIPT      = "booker.py"       # your tee time booker script
+VENV_PYTHON = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python3")
 
-DEFAULT_CONFIG = {
-    "day":        "saturday",
-    "time_from":  "08:00",
-    "time_to":    "10:00",
-    "players":    4,
-    "holes":      18,
-    "fallback":   "next",
-    "phone":      "",
-    "carrier":    "vtext.com",
-    "notify_booked":   True,
-    "notify_fallback": True,
-    "notify_failed":   True,
-    "notify_reminder": False,
-}
+# Fall back to system python if venv not found
+PYTHON = VENV_PYTHON if os.path.exists(VENV_PYTHON) else "python3"
+
+_running = threading.Lock()     # prevent double-runs
 
 
-def read_config() -> dict:
-    if not os.path.exists(CONFIG_FILE):
-        write_config(DEFAULT_CONFIG)
-    with open(CONFIG_FILE, "r") as f:
-        return json.load(f)
+def save_status(result: dict):
+    with open(STATUS_FILE, "w") as f:
+        json.dump(result, f, indent=2)
 
 
-def write_config(data: dict):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-    log.info("Config saved.")
+def load_status() -> dict:
+    if os.path.exists(STATUS_FILE):
+        with open(STATUS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def tail_log(n=40) -> list:
+    """Return the last n lines of the log file."""
+    if not os.path.exists(LOG_FILE):
+        return ["No log file yet."]
+    with open(LOG_FILE) as f:
+        lines = f.readlines()
+    return [l.rstrip() for l in lines[-n:]]
+
+
+def run_booker_subprocess() -> dict:
+    """Run booker.py as a subprocess and parse its output."""
+    try:
+        result = subprocess.run(
+            [PYTHON, SCRIPT],
+            capture_output=True,
+            text=True,
+            timeout=120,          # 2-minute timeout
+            cwd=os.path.dirname(__file__)
+        )
+        output = result.stdout + result.stderr
+
+        # Parse outcome from log output
+        booked_match = re.search(r"BOOKED.*?(\d{1,2}:\d{2})", output, re.IGNORECASE)
+        date_match   = re.search(r"Target date:\s*(\S+)", output)
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        target = date_match.group(1) if date_match else "Saturday"
+
+        if booked_match:
+            status = {
+                "ran_at":       now,
+                "target_date":  target,
+                "result":       "✅ Booked!",
+                "time_booked":  booked_match.group(1),
+                "success":      True,
+            }
+        elif "no eligible" in output.lower() or "no tee times" in output.lower():
+            status = {
+                "ran_at":       now,
+                "target_date":  target,
+                "result":       "❌ No times available",
+                "time_booked":  None,
+                "success":      False,
+                "message":      "No tee times between 8–10 AM for 4 players.",
+            }
+        elif "login" in output.lower() and "fail" in output.lower():
+            status = {
+                "ran_at":       now,
+                "target_date":  target,
+                "result":       "❌ Login failed",
+                "time_booked":  None,
+                "success":      False,
+                "message":      "Could not log in to foreUP. Check credentials in .env",
+            }
+        else:
+            status = {
+                "ran_at":       now,
+                "target_date":  target,
+                "result":       "⚠️ Unknown outcome",
+                "time_booked":  None,
+                "success":      False,
+                "message":      "Check the activity log for details.",
+            }
+
+        save_status(status)
+        return status
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "message": "Booking timed out after 2 minutes."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return send_from_directory(".", "dashboard.html")
 
 
-@app.route("/api/config", methods=["GET"])
-def get_config():
-    return jsonify(read_config())
+@app.route("/status")
+def status():
+    return jsonify({
+        "last_run":  load_status(),
+        "log_lines": tail_log(50),
+    })
 
 
-@app.route("/api/config", methods=["POST"])
-def save_config():
-    incoming = request.get_json(force=True)
-    if not incoming:
-        return jsonify({"error": "No data received"}), 400
+@app.route("/run", methods=["POST"])
+def run():
+    if not _running.acquire(blocking=False):
+        return jsonify({
+            "success": False,
+            "message": "A booking is already in progress — please wait."
+        }), 409
 
-    current = read_config()
-    current.update(incoming)          # merge — only overwrite what was sent
-    write_config(current)
-    return jsonify({"status": "ok", "config": current})
+    def do_run():
+        try:
+            run_booker_subprocess()
+        finally:
+            _running.release()
 
+    thread = threading.Thread(target=do_run, daemon=True)
+    thread.start()
+    thread.join(timeout=90)   # wait up to 90s for result
 
-@app.route("/api/logs", methods=["GET"])
-def get_logs():
-    log_file = os.path.join(os.path.dirname(__file__), "booker.log")
-    if not os.path.exists(log_file):
-        return jsonify({"lines": []})
-    with open(log_file, "r") as f:
-        lines = f.readlines()
-    last_20 = [l.strip() for l in lines[-20:] if l.strip()]
-    return jsonify({"lines": last_20})
+    result = load_status()
+    return jsonify(result)
 
 
 if __name__ == "__main__":
+    # 0.0.0.0 makes it accessible from outside the VM
+    # Port 5000 — we'll put Nginx in front of it
     app.run(host="0.0.0.0", port=5000, debug=False)
