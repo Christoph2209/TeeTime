@@ -1,26 +1,23 @@
-import time
-import logging
-import smtplib
-import imaplib
+import argparse
 import email
 import email.header
-import re
+import imaplib
+import logging
 import os
-import argparse
-
+import re
+import smtplib
+import time
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 load_dotenv()
@@ -31,25 +28,36 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASSWORD")
 
+COURSE_ID = "19757"
+SCHEDULE_ID = "2440"
+BASE_URL = "https://foreupsoftware.com"
+BOOKING_URL = f"{BASE_URL}/index.php/booking/{COURSE_ID}/{SCHEDULE_ID}"
+
 DEFAULT_PLAYERS = 4
 DEFAULT_HOLES = "18"
 DEFAULT_EARLIEST_HOUR = 8
 DEFAULT_LATEST_HOUR = 10
 DEFAULT_HEADLESS = True
 DEFAULT_CLICK_FINAL_BOOK_BUTTON = False
+DEBUG_SCREENSHOTS = False
 
 HEADLESS = DEFAULT_HEADLESS
 CLICK_FINAL_BOOK_BUTTON = DEFAULT_CLICK_FINAL_BOOK_BUTTON
-
 TARGET_PLAYERS = DEFAULT_PLAYERS
 TARGET_HOLES = DEFAULT_HOLES
 EARLIEST_HOUR = DEFAULT_EARLIEST_HOUR
 LATEST_HOUR = DEFAULT_LATEST_HOUR
 
-COURSE_ID = "19757"
-SCHEDULE_ID = "2440"
-BASE_URL = "https://foreupsoftware.com"
-BOOKING_URL = f"{BASE_URL}/index.php/booking/{COURSE_ID}/{SCHEDULE_ID}"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)s  %(message)s",
+    handlers=[
+        logging.FileHandler("booker.log"),
+        logging.StreamHandler(),
+    ],
+)
+log = logging.getLogger(__name__)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -57,22 +65,11 @@ def parse_args():
     parser.add_argument("--holes", type=str, default=DEFAULT_HOLES, choices=["9", "18"])
     parser.add_argument("--earliest-hour", type=int, default=DEFAULT_EARLIEST_HOUR)
     parser.add_argument("--latest-hour", type=int, default=DEFAULT_LATEST_HOUR)
-    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--headless", dest="headless", action="store_true")
+    parser.add_argument("--no-headless", dest="headless", action="store_false")
+    parser.set_defaults(headless=DEFAULT_HEADLESS)
     parser.add_argument("--click-final-book-button", action="store_true")
     return parser.parse_args()
-
-# Safety switch: leave False so it DOES NOT actually book
-CLICK_FINAL_BOOK_BUTTON = False
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[
-        logging.FileHandler("booker.log"),
-        logging.StreamHandler()
-    ]
-)
-log = logging.getLogger(__name__)
 
 
 def next_saturday() -> str:
@@ -110,6 +107,8 @@ def send_notification(subject: str, body: str):
 
 
 def save_screenshot(driver, name="debug"):
+    if not DEBUG_SCREENSHOTS:
+        return
     script_dir = os.path.dirname(os.path.abspath(__file__))
     photos_dir = os.path.join(script_dir, "photos")
     os.makedirs(photos_dir, exist_ok=True)
@@ -133,8 +132,7 @@ def make_driver() -> webdriver.Chrome:
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
     )
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=opts)
+    driver = webdriver.Chrome(options=opts)
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
@@ -147,348 +145,6 @@ def decode_header_value(value: str) -> str:
     decoded_parts = email.header.decode_header(value)
     out = []
     for part, enc in decoded_parts:
-        if isinstance(part, bytes):
-            out.append(part.decode(enc or "utf-8", errors="ignore"))
-        else:
-            out.append(part)
-    return "".join(out)
-
-
-def strip_html(html: str) -> str:
-    html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
-    html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
-    html = re.sub(r"(?s)<[^>]+>", " ", html)
-    html = re.sub(r"&nbsp;|&#160;", " ", html)
-    html = re.sub(r"&amp;", "&", html)
-    html = re.sub(r"\s+", " ", html)
-    return html.strip()
-
-
-def get_text_bodies(msg) -> tuple[str, str]:
-    text_plain = []
-    text_html = []
-
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = (part.get_content_type() or "").lower()
-            disposition = str(part.get("Content-Disposition") or "").lower()
-
-            if "attachment" in disposition:
-                continue
-
-            payload = part.get_payload(decode=True)
-            if not payload:
-                continue
-
-            charset = part.get_content_charset() or "utf-8"
-            decoded = payload.decode(charset, errors="ignore")
-
-            if content_type == "text/plain":
-                text_plain.append(decoded)
-            elif content_type == "text/html":
-                text_html.append(decoded)
-    else:
-        payload = msg.get_payload(decode=True)
-        if payload:
-            charset = msg.get_content_charset() or "utf-8"
-            decoded = payload.decode(charset, errors="ignore")
-            if (msg.get_content_type() or "").lower() == "text/html":
-                text_html.append(decoded)
-            else:
-                text_plain.append(decoded)
-
-    return "\n".join(text_plain), "\n".join(text_html)
-
-
-def next_saturday_human() -> str:
-    today = datetime.now()
-    days_ahead = (5 - today.weekday()) % 7
-    if days_ahead == 0:
-        days_ahead = 7
-    sat = today + timedelta(days=days_ahead)
-    return sat.strftime("%b %d, %Y")
-
-
-def load_tee_times(driver, wait, saturday: str):
-    log.info(f"Loading booking page for {saturday}...")
-    driver.get(BOOKING_URL)
-    time.sleep(3)
-    save_screenshot(driver, "01_loaded")
-
-    try:
-        date_input = wait.until(EC.presence_of_element_located((
-            By.CSS_SELECTOR,
-            "input[id*='date'], input[name*='date'], input.date-input, #date-field"
-        )))
-        driver.execute_script("arguments[0].value = '';", date_input)
-        date_input.clear()
-        date_input.send_keys(saturday)
-        date_input.send_keys(Keys.ENTER)
-        log.info(f"Set date to {saturday}")
-        time.sleep(.1)
-    except TimeoutException:
-        log.warning("Date input not found by CSS — trying fallback")
-        try:
-            date_input = driver.find_element(By.XPATH, "//input[@type='text' and contains(@value, '-')]")
-            driver.execute_script(f"arguments[0].value = '{saturday}';", date_input)
-            driver.execute_script(
-                "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));"
-                "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
-                date_input
-            )
-            time.sleep(.1)
-        except Exception as e:
-            log.error(f"Could not set date: {e}")
-            raise
-
-    save_screenshot(driver, "02_date_set")
-
-    try:
-        player_btn = wait.until(EC.element_to_be_clickable((
-            By.XPATH,
-            f"//button[normalize-space(text())='{TARGET_PLAYERS}'] | "
-            f"//a[normalize-space(text())='{TARGET_PLAYERS}']"
-        )))
-        driver.execute_script("arguments[0].click();", player_btn)
-        log.info(f"Clicked '{TARGET_PLAYERS}' players button")
-        time.sleep(0.1)
-    except TimeoutException:
-        log.warning("Could not find player '4' button — maybe already selected")
-
-    try:
-        morning_btn = driver.find_element(
-            By.XPATH, "//button[contains(text(),'Evening')] | //a[contains(text(),'Evening')]"
-        )
-        driver.execute_script("arguments[0].click();", morning_btn)
-        log.info("Clicked 'Morning' filter")
-        time.sleep(0.1)
-    except NoSuchElementException:
-        log.warning("No 'Morning' button found — showing all times")
-
-    save_screenshot(driver, "03_filtered")
-
-
-def select_tee_time(driver, wait) -> str | None:
-    log.info("Looking for eligible tee time cards...")
-
-    try:
-        wait.until(EC.presence_of_element_located((
-            By.XPATH, "//*[contains(@class,'booking') or contains(@class,'teetime') or contains(@class,'time-slot')]"
-        )))
-    except TimeoutException:
-        log.error("No tee time cards appeared on page.")
-        save_screenshot(driver, "04_no_cards")
-        return None
-
-    time_elements = driver.find_elements(
-        By.XPATH,
-        "//*[contains(@class,'booking') or contains(@class,'teetime') or contains(@class,'time-slot')]"
-        "//*[contains(text(),'am') or contains(text(),'pm')]"
-    )
-
-    if not time_elements:
-        time_elements = driver.find_elements(
-            By.XPATH,
-            "//*[string-length(normalize-space(text())) < 10 and "
-            "(contains(normalize-space(text()),'am') or contains(normalize-space(text()),'pm'))]"
-        )
-
-    log.info(f"Found {len(time_elements)} time-like elements")
-
-    for el in time_elements:
-        raw = el.text.strip().lower()
-        if not raw or len(raw) > 12:
-            continue
-
-        hour = -1
-        for fmt in ("%I:%M%p", "%I:%M %p", "%I%p"):
-            try:
-                parsed = datetime.strptime(raw.upper(), fmt)
-                hour = parsed.hour
-                break
-            except ValueError:
-                continue
-
-        if hour < EARLIEST_HOUR or hour > LATEST_HOUR:
-            continue
-
-        log.info(f"Eligible time found: {raw}")
-
-        try:
-            card = el
-            for _ in range(6):
-                try:
-                    parent = card.find_element(By.XPATH, "..")
-                    tag = parent.tag_name.lower()
-                    cls = (parent.get_attribute("class") or "").lower()
-                    if tag in ("div", "li", "article", "a", "button") and any(
-                        kw in cls for kw in ["booking", "teetime", "slot", "time", "card"]
-                    ):
-                        card = parent
-                        break
-                    card = parent
-                except Exception:
-                    break
-
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", card)
-            time.sleep(0.5)
-            driver.execute_script("arguments[0].click();", card)
-            log.info(f"Clicked card for {raw}")
-            time.sleep(3)
-            save_screenshot(driver, f"05_clicked_{raw.replace(':', '').replace(' ', '')}")
-            return raw
-        except Exception as e:
-            log.warning(f"Could not click card for {raw}: {e}")
-
-    log.warning("No eligible tee times found in target window.")
-    save_screenshot(driver, "04_no_eligible")
-    return None
-
-
-def login_when_prompted(driver, wait) -> bool:
-    save_screenshot(driver, "06_after_card_click")
-    page = driver.page_source.lower()
-
-    if "password" not in page and "log in" not in page and "login" not in page:
-        log.info("No login form visible yet — trying nav 'Log In'")
-        try:
-            login_link = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((
-                By.XPATH,
-                "//a[contains(normalize-space(.), 'Log In')] | "
-                "//a[contains(normalize-space(.), 'Login')] | "
-                "//button[contains(normalize-space(.), 'Log In')]"
-            )))
-            driver.execute_script("arguments[0].click();", login_link)
-            time.sleep(.2)
-            save_screenshot(driver, "07_login_link_clicked")
-        except TimeoutException:
-            log.warning("No nav login link found")
-
-    page = driver.page_source.lower()
-    if "password" not in page:
-        log.error("Still no login form visible.")
-        save_screenshot(driver, "07_still_no_login")
-        return False
-
-    email_field = None
-    for sel in [
-        "input[type='email']",
-        "input[name='username']",
-        "input[name='email']",
-        "input[placeholder*='email' i]",
-        "input[placeholder*='user' i]",
-        "#username",
-        "#email",
-    ]:
-        try:
-            email_field = driver.find_element(By.CSS_SELECTOR, sel)
-            log.info(f"Email field found: {sel}")
-            break
-        except NoSuchElementException:
-            continue
-
-    if not email_field:
-        log.error("Could not find email input.")
-        save_screenshot(driver, "08_no_email_field")
-        return False
-
-    try:
-        email_field.clear()
-        email_field.send_keys(FOREUP_EMAIL)
-
-        pass_field = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        pass_field.clear()
-        pass_field.send_keys(FOREUP_PASSWORD)
-    except NoSuchElementException:
-        log.error("Could not find password field.")
-        return False
-
-    try:
-        login_btn = wait.until(EC.element_to_be_clickable((
-            By.XPATH, "//button[normalize-space(text())='Log In']"
-        )))
-        time.sleep(1.5)
-        driver.execute_script("arguments[0].click();", login_btn)
-        log.info("Clicked 'Log In' button.")
-    except TimeoutException:
-        pass_field.send_keys(Keys.ENTER)
-        log.info("Submitted via Enter key.")
-
-    time.sleep(0.4)
-    save_screenshot(driver, "09_after_login")
-
-    page = driver.page_source.lower()
-    if any(x in page for x in ["logout", "log out", "sign out", "my account", "booking code", "reservation process"]):
-        log.info("Login step appears successful.")
-        return True
-
-    log.warning("Login may have failed.")
-    return False
-
-
-def find_booking_modal(driver, wait):
-    modal_xpaths = [
-        "//div[contains(@class,'modal') and .//*[contains(normalize-space(.), 'Book Time')]]",
-        "//div[contains(@class,'modal') and .//*[contains(normalize-space(.), 'Booking Code')]]",
-        "//div[contains(@class,'modal') and .//*[@id='reservation_confirmation_uid']]",
-    ]
-
-    for xp in modal_xpaths:
-        try:
-            modal = wait.until(EC.presence_of_element_located((By.XPATH, xp)))
-            return modal
-        except TimeoutException:
-            continue
-
-    raise TimeoutException("Could not find booking modal.")
-
-
-def select_holes(driver, wait, holes: str = None) -> bool:
-    if holes is None:
-        holes = TARGET_HOLES
-    log.info(f"Selecting {holes} holes in booking modal...")
-
-    try:
-        modal = find_booking_modal(driver, wait)
-    except TimeoutException:
-        log.error("Could not find booking modal.")
-        save_screenshot(driver, "10_modal_not_found")
-        return False
-
-    xpaths = [
-        f".//label[contains(normalize-space(.), 'Holes')]/following::button[normalize-space(text())='{holes}'][1]",
-        f".//label[contains(normalize-space(.), 'Holes')]/following::*[self::button or self::a][normalize-space(text())='{holes}'][1]",
-        f".//button[normalize-space(text())='{holes}']",
-        f".//a[normalize-space(text())='{holes}']",
-    ]
-
-    for xp in xpaths:
-        try:
-            candidates = modal.find_elements(By.XPATH, xp)
-            for btn in candidates:
-                if not btn.is_displayed() or not btn.is_enabled():
-                    continue
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-                time.sleep(0.3)
-                driver.execute_script("arguments[0].click();", btn)
-                time.sleep(.5)
-                log.info(f"Selected {holes} holes in modal")
-                save_screenshot(driver, f"10_holes_{holes}_selected")
-                return True
-        except Exception as e:
-            log.warning(f"Hole selection attempt failed for xpath {xp}: {e}")
-
-    log.error("Could not select modal hole button.")
-    save_screenshot(driver, "10_holes_not_selected")
-    return False
-
-
-def decode_header_value(value: str) -> str:
-    if not value:
-        return ""
-    parts = email.header.decode_header(value)
-    out = []
-    for part, enc in parts:
         if isinstance(part, bytes):
             out.append(part.decode(enc or "utf-8", errors="ignore"))
         else:
@@ -565,48 +221,7 @@ def extract_booking_code(subject: str, text_body: str, html_body: str) -> str | 
     return codes[-1] if codes else None
 
 
-def print_email_match(from_header: str, subject: str, date_header: str, text_body: str, html_body: str, code: str | None):
-    preview = text_body.strip() if text_body.strip() else strip_html(html_body)
-    preview = preview[:1000].replace("\n", " ")
-
-    print("\n" + "=" * 80)
-    print("MATCHED EMAIL")
-    print("=" * 80)
-    print(f"FROM   : {from_header}")
-    print(f"SUBJECT: {subject}")
-    print(f"DATE   : {date_header}")
-    print(f"CODE   : {code}")
-    print("BODY PREVIEW:")
-    print(preview)
-    print("=" * 80 + "\n")
-
-    log.info("=" * 80)
-    log.info("MATCHED EMAIL")
-    log.info(f"FROM   : {from_header}")
-    log.info(f"SUBJECT: {subject}")
-    log.info(f"DATE   : {date_header}")
-    log.info(f"CODE   : {code}")
-    log.info(f"BODY PREVIEW: {preview}")
-    log.info("=" * 80)
-
-
-def click_resend_code(driver, wait) -> bool:
-    try:
-        btn = wait.until(EC.element_to_be_clickable((
-            By.CSS_SELECTOR, "button.js-reservation-confirmation-resend-button"
-        )))
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-        time.sleep(0.3)
-        driver.execute_script("arguments[0].click();", btn)
-        log.info("Clicked Resend Code")
-        save_screenshot(driver, "11_resend_code_clicked")
-        return True
-    except Exception as e:
-        log.warning(f"Could not click Resend Code: {e}")
-        return False
-
-
-def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5) -> str | None:
+def get_booking_code_from_email(timeout_seconds: int = 30, poll_every: float = 1.0) -> str | None:
     if not GMAIL_USER or not GMAIL_APP_PASS:
         log.error("Missing GMAIL_USER or GMAIL_APP_PASSWORD.")
         return None
@@ -615,16 +230,13 @@ def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5)
 
     while time.time() < end_time:
         try:
-            log.info("Checking Gmail for ForeUp reservation confirmation email...")
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(GMAIL_USER, GMAIL_APP_PASS)
 
-            mailbox_candidates = ["[Gmail]/All Mail", "All Mail", "INBOX"]
             selected_box = None
-
-            for box in mailbox_candidates:
+            for box in ['"[Gmail]/All Mail"', '"All Mail"', "INBOX"]:
                 try:
-                    status, _ = mail.select(f'"{box}"')
+                    status, _ = mail.select(box)
                     if status == "OK":
                         selected_box = box
                         break
@@ -632,25 +244,18 @@ def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5)
                     continue
 
             if not selected_box:
-                status, _ = mail.select("INBOX")
-                if status != "OK":
-                    log.error("Could not select any mailbox.")
-                    mail.logout()
-                    time.sleep(poll_every)
-                    continue
-                selected_box = "INBOX"
-
-            log.info(f"Searching mailbox: {selected_box}")
+                mail.logout()
+                time.sleep(poll_every)
+                continue
 
             status, data = mail.search(None, "ALL")
             if status != "OK":
-                log.error("IMAP search failed.")
                 mail.logout()
                 time.sleep(poll_every)
                 continue
 
             ids = data[0].split()
-            ids = list(reversed(ids[-50:]))
+            ids = list(reversed(ids[-10:]))
 
             for num in ids:
                 status, msg_data = mail.fetch(num, "(RFC822)")
@@ -658,10 +263,8 @@ def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5)
                     continue
 
                 msg = email.message_from_bytes(msg_data[0][1])
-
                 subject = decode_header_value(msg.get("Subject", ""))
                 from_header = decode_header_value(msg.get("From", ""))
-                date_header = decode_header_value(msg.get("Date", ""))
 
                 from_lower = from_header.lower()
                 subject_lower = subject.lower()
@@ -677,18 +280,8 @@ def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5)
 
                 text_body, html_body = get_text_bodies(msg)
                 code = extract_booking_code(subject, text_body, html_body)
-
-                print_email_match(
-                    from_header=from_header,
-                    subject=subject,
-                    date_header=date_header,
-                    text_body=text_body,
-                    html_body=html_body,
-                    code=code,
-                )
-
                 if code:
-                    log.info(f"Booking code found: {code}")
+                    log.info("Booking code found in email.")
                     mail.logout()
                     return code
 
@@ -697,17 +290,272 @@ def get_booking_code_from_email(timeout_seconds: int = 180, poll_every: int = 5)
         except Exception as e:
             log.warning(f"Gmail polling error: {e}")
 
-        log.info(f"No valid booking code email yet. Retrying in {poll_every}s...")
         time.sleep(poll_every)
 
     log.error("Timed out waiting for booking code email.")
     return None
 
 
+def load_tee_times(driver, wait, saturday: str):
+    log.info(f"Loading booking page for {saturday}...")
+    driver.get(BOOKING_URL)
+    wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+    save_screenshot(driver, "01_loaded")
+
+    try:
+        date_input = wait.until(EC.presence_of_element_located((
+            By.CSS_SELECTOR,
+            "input[id*='date'], input[name*='date'], input.date-input, #date-field"
+        )))
+        driver.execute_script("arguments[0].value = '';", date_input)
+        date_input.clear()
+        date_input.send_keys(saturday)
+        date_input.send_keys(Keys.ENTER)
+        log.info(f"Set date to {saturday}")
+    except TimeoutException:
+        try:
+            date_input = driver.find_element(By.XPATH, "//input[@type='text' and contains(@value, '-')]")
+            driver.execute_script(f"arguments[0].value = '{saturday}';", date_input)
+            driver.execute_script(
+                "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
+                date_input
+            )
+        except Exception as e:
+            log.error(f"Could not set date: {e}")
+            raise
+
+    try:
+        player_btn = wait.until(EC.element_to_be_clickable((
+            By.XPATH,
+            f"//button[normalize-space(text())='{TARGET_PLAYERS}'] | "
+            f"//a[normalize-space(text())='{TARGET_PLAYERS}']"
+        )))
+        driver.execute_script("arguments[0].click();", player_btn)
+        log.info(f"Clicked '{TARGET_PLAYERS}' players button")
+        time.sleep(1)
+    except TimeoutException:
+        log.warning(f"Could not find player '{TARGET_PLAYERS}' button — maybe already selected")
+
+    save_screenshot(driver, "03_filtered")
+
+
+def select_tee_time(driver, wait) -> str | None:
+    log.info("Looking for eligible tee time cards...")
+
+    try:
+        wait.until(EC.presence_of_element_located((
+            By.XPATH, "//*[contains(@class,'booking') or contains(@class,'teetime') or contains(@class,'time-slot')]"
+        )))
+    except TimeoutException:
+        log.error("No tee time cards appeared on page.")
+        save_screenshot(driver, "04_no_cards")
+        return None
+
+    time_elements = driver.find_elements(
+        By.XPATH,
+        "//*[contains(@class,'booking') or contains(@class,'teetime') or contains(@class,'time-slot')]"
+        "//*[contains(text(),'am') or contains(text(),'pm')]"
+    )
+
+    if not time_elements:
+        time_elements = driver.find_elements(
+            By.XPATH,
+            "//*[string-length(normalize-space(text())) < 10 and "
+            "(contains(normalize-space(text()),'am') or contains(normalize-space(text()),'pm'))]"
+        )
+
+    log.info(f"Found {len(time_elements)} time-like elements")
+
+    for el in time_elements:
+        raw = el.text.strip().lower()
+        if not raw or len(raw) > 12:
+            continue
+
+        hour = -1
+        for fmt in ("%I:%M%p", "%I:%M %p", "%I%p"):
+            try:
+                parsed = datetime.strptime(raw.upper(), fmt)
+                hour = parsed.hour
+                break
+            except ValueError:
+                continue
+
+        if hour < EARLIEST_HOUR or hour > LATEST_HOUR:
+            continue
+
+        log.info(f"Eligible time found: {raw}")
+
+        try:
+            card = el
+            for _ in range(6):
+                try:
+                    parent = card.find_element(By.XPATH, "..")
+                    tag = parent.tag_name.lower()
+                    cls = (parent.get_attribute("class") or "").lower()
+                    if tag in ("div", "li", "article", "a", "button") and any(
+                        kw in cls for kw in ["booking", "teetime", "slot", "time", "card"]
+                    ):
+                        card = parent
+                        break
+                    card = parent
+                except Exception:
+                    break
+
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", card)
+            driver.execute_script("arguments[0].click();", card)
+
+            wait.until(lambda d: (
+                "password" in d.page_source.lower()
+                or "booking code" in d.page_source.lower()
+                or "reservation process" in d.page_source.lower()
+                or "log in" in d.page_source.lower()
+            ))
+
+            save_screenshot(driver, f"05_clicked_{raw.replace(':', '').replace(' ', '')}")
+            return raw
+        except Exception as e:
+            log.warning(f"Could not click card for {raw}: {e}")
+
+    log.warning("No eligible tee times found in target window.")
+    save_screenshot(driver, "04_no_eligible")
+    return None
+
+
+def login_when_prompted(driver, wait) -> bool:
+    save_screenshot(driver, "06_after_card_click")
+    page = driver.page_source.lower()
+
+    if "password" not in page and "log in" not in page and "login" not in page:
+        try:
+            login_link = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((
+                By.XPATH,
+                "//a[contains(normalize-space(.), 'Log In')] | "
+                "//a[contains(normalize-space(.), 'Login')] | "
+                "//button[contains(normalize-space(.), 'Log In')]"
+            )))
+            driver.execute_script("arguments[0].click();", login_link)
+        except TimeoutException:
+            log.warning("No nav login link found")
+
+    page = driver.page_source.lower()
+    if "password" not in page:
+        log.error("Still no login form visible.")
+        save_screenshot(driver, "07_still_no_login")
+        return False
+
+    email_field = None
+    for sel in [
+        "input[type='email']",
+        "input[name='username']",
+        "input[name='email']",
+        "input[placeholder*='email' i]",
+        "input[placeholder*='user' i]",
+        "#username",
+        "#email",
+    ]:
+        try:
+            email_field = driver.find_element(By.CSS_SELECTOR, sel)
+            break
+        except NoSuchElementException:
+            continue
+
+    if not email_field:
+        log.error("Could not find email input.")
+        save_screenshot(driver, "08_no_email_field")
+        return False
+
+    try:
+        email_field.clear()
+        email_field.send_keys(FOREUP_EMAIL)
+
+        pass_field = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+        pass_field.clear()
+        pass_field.send_keys(FOREUP_PASSWORD)
+    except NoSuchElementException:
+        log.error("Could not find password field.")
+        return False
+
+    try:
+        login_btn = wait.until(EC.element_to_be_clickable((
+            By.XPATH, "//button[normalize-space(text())='Log In']"
+        )))
+        driver.execute_script("arguments[0].click();", login_btn)
+        log.info("Clicked 'Log In' button.")
+    except TimeoutException:
+        pass_field.send_keys(Keys.ENTER)
+        log.info("Submitted via Enter key.")
+
+    try:
+        wait.until(lambda d: any(
+            x in d.page_source.lower()
+            for x in ["logout", "log out", "sign out", "my account", "booking code", "reservation process"]
+        ))
+        save_screenshot(driver, "09_after_login")
+        log.info("Login step appears successful.")
+        return True
+    except TimeoutException:
+        log.warning("Login may have failed.")
+        return False
+
+
+def find_booking_modal(driver, wait):
+    modal_xpaths = [
+        "//div[contains(@class,'modal') and .//*[contains(normalize-space(.), 'Book Time')]]",
+        "//div[contains(@class,'modal') and .//*[contains(normalize-space(.), 'Booking Code')]]",
+        "//div[contains(@class,'modal') and .//*[@id='reservation_confirmation_uid']]",
+    ]
+
+    for xp in modal_xpaths:
+        try:
+            return wait.until(EC.presence_of_element_located((By.XPATH, xp)))
+        except TimeoutException:
+            continue
+
+    raise TimeoutException("Could not find booking modal.")
+
+
+def select_holes(driver, wait, holes: str = None) -> bool:
+    if holes is None:
+        holes = TARGET_HOLES
+
+    try:
+        modal = find_booking_modal(driver, wait)
+    except TimeoutException:
+        log.error("Could not find booking modal.")
+        save_screenshot(driver, "10_modal_not_found")
+        return False
+
+    xpaths = [
+        f".//label[contains(normalize-space(.), 'Holes')]/following::button[normalize-space(text())='{holes}'][1]",
+        f".//label[contains(normalize-space(.), 'Holes')]/following::*[self::button or self::a][normalize-space(text())='{holes}'][1]",
+        f".//button[normalize-space(text())='{holes}']",
+        f".//a[normalize-space(text())='{holes}']",
+    ]
+
+    for xp in xpaths:
+        try:
+            candidates = modal.find_elements(By.XPATH, xp)
+            for btn in candidates:
+                if not btn.is_displayed() or not btn.is_enabled():
+                    continue
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                driver.execute_script("arguments[0].click();", btn)
+                log.info(f"Selected {holes} holes in modal")
+                save_screenshot(driver, f"10_holes_{holes}_selected")
+                return True
+        except Exception as e:
+            log.warning(f"Hole selection attempt failed for xpath {xp}: {e}")
+
+    log.error("Could not select modal hole button.")
+    save_screenshot(driver, "10_holes_not_selected")
+    return False
+
+
 def enter_booking_code(driver, wait) -> bool:
     log.info("Waiting for booking code email and entering it...")
 
-    code = get_booking_code_from_email(timeout_seconds=180, poll_every=5)
+    code = get_booking_code_from_email(timeout_seconds=30, poll_every=1.0)
     if not code:
         save_screenshot(driver, "12_no_booking_code_found")
         return False
@@ -721,8 +569,6 @@ def enter_booking_code(driver, wait) -> bool:
 
     try:
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", code_input)
-        time.sleep(0.3)
-
         driver.execute_script("""
             arguments[0].removeAttribute('readonly');
             arguments[0].removeAttribute('disabled');
@@ -734,8 +580,6 @@ def enter_booking_code(driver, wait) -> bool:
         """, code_input, code)
 
         entered = code_input.get_attribute("value") or ""
-        log.info(f"Booking code field now contains: {entered}")
-
         if entered != code:
             log.error(f"Booking code did not stick. Expected {code}, got {entered}")
             save_screenshot(driver, "12_code_value_mismatch")
@@ -776,7 +620,6 @@ def preview_without_booking(driver, wait) -> bool:
     try:
         btn = find_book_time_button(driver, wait)
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-        time.sleep(0.5)
         save_screenshot(driver, "13_ready_to_book_not_clicked")
         log.info("Reached final step successfully. Book Time button found, but not clicked.")
         return True
@@ -790,10 +633,8 @@ def click_confirm_button(driver, wait) -> bool:
     try:
         btn = find_book_time_button(driver, wait)
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-        time.sleep(0.3)
         driver.execute_script("arguments[0].click();", btn)
         log.info("Clicked Book Time button")
-        time.sleep(4)
         save_screenshot(driver, "13_after_final_confirm")
         return True
     except Exception as e:
@@ -808,11 +649,10 @@ def complete_until_final_step(driver, wait, time_str: str) -> bool:
     if not select_holes(driver, wait, TARGET_HOLES):
         return False
 
-    # Do NOT resend; just wait for the existing code email
     if not enter_booking_code(driver, wait):
         return False
 
-    return preview_without_booking(driver, wait)
+    return click_confirm_button(driver, wait) if CLICK_FINAL_BOOK_BUTTON else preview_without_booking(driver, wait)
 
 
 def run_booking_job():
@@ -822,7 +662,7 @@ def run_booking_job():
     log.info(f"Target date: {saturday}")
 
     driver = make_driver()
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 10)
 
     try:
         load_tee_times(driver, wait, saturday)
@@ -850,6 +690,7 @@ def run_booking_job():
                     "⛳ Tee time booked!",
                     f"James Baird\nDate: {saturday}\nTime: {chosen_time}\nPlayers: {TARGET_PLAYERS}\nHoles: {TARGET_HOLES}"
                 )
+                log.info("BOOKING CONFIRMED: %s", chosen_time)
                 log.info("Job complete — booked!")
             else:
                 send_notification(
@@ -873,8 +714,7 @@ def run_booking_job():
         send_notification("Tee time bot: error", str(e))
     finally:
         if not HEADLESS:
-            log.info("Pausing 20s so you can inspect the browser...")
-            time.sleep(20)
+            time.sleep(5)
         driver.quit()
         log.info("Browser closed.")
 
