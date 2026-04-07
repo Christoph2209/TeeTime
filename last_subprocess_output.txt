@@ -1,0 +1,12 @@
+
+2026-04-07 15:36:09,749  INFO  ============================================================
+2026-04-07 15:36:09,750  INFO  Booking job started.
+2026-04-07 15:36:09,750  INFO  Target date: 04-18-2026
+2026-04-07 15:36:10,384  INFO  Loading booking page for 04-18-2026...
+2026-04-07 15:36:12,254  INFO  Set date to 04-18-2026
+2026-04-07 15:36:12,284  INFO  Clicked '4' players button
+2026-04-07 15:36:13,284  INFO  Looking for eligible tee time cards...
+2026-04-07 15:36:13,301  INFO  Found 44 time-like elements
+2026-04-07 15:36:13,501  WARNING  No eligible tee times found in target window.
+2026-04-07 15:36:13,501  WARNING  Notification config incomplete — skipping.
+2026-04-07 15:36:15,634  INFO  Browser closed.

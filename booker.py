@@ -74,9 +74,16 @@ def parse_args():
 
 def next_saturday() -> str:
     today = datetime.now()
-    days_ahead = (5 - today.weekday()) % 7
-    if days_ahead == 0:
-        days_ahead = 7
+
+    # Saturday = 5
+    days_until_this_saturday = (5 - today.weekday()) % 7
+
+    # Always go to NEXT week's Saturday
+    if today.weekday() <= 5:  # Mon–Sat
+        days_ahead = days_until_this_saturday + 7
+    else:  # Sunday
+        days_ahead = (5 - today.weekday()) % 7  # already next week
+
     sat = today + timedelta(days=days_ahead)
     return sat.strftime("%m-%d-%Y")
 
