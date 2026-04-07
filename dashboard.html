@@ -572,73 +572,117 @@
   // ── Manual booking trigger ─────────────────────────────────────────────────
   // This calls the /run endpoint on your Flask server (set up on Oracle)
   async function triggerBooking() {
+  const btn = document.getElementById('bookBtn');
+
+  const payload = {
+    players: parseInt(document.getElementById('playersInput').value, 10),
+    holes: document.getElementById('holesInput').value,
+    earliest_hour: parseInt(document.getElementById('earliestHourInput').value, 10),
+    latest_hour: parseInt(document.getElementById('latestHourInput').value, 10),
+    click_final_book_button: false
+  };
+
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.querySelector('.btn-text').textContent = 'Booking in progress…';
+
+  setStatus('running', 'Booking Now…', 'Starting booking run...');
+  addLog(`Manual booking triggered with config: ${JSON.stringify(payload)}`, 'info');
+
+  try {
+    const resp = await fetch('/api/tee-time/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok || !data.success) {
+      throw new Error(data.message || 'Failed to start booking.');
+    }
+
+    showToast('Booking started.');
+  } catch (err) {
+    setStatus('error', 'Could not start', err.message);
+    addLog('Start error: ' + err.message, 'err');
+    showToast(err.message, true);
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.querySelector('.btn-text').textContent = '⛳ Book Right Now (Manual)';
+  }
+}
+
+async function cancelBooking() {
+  try {
+    const resp = await fetch('/api/tee-time/cancel', {
+      method: 'POST'
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || !data.success) {
+      throw new Error(data.message || 'Could not cancel.');
+    }
+
+    setStatus('idle', 'Cancelled', 'The current booking run was cancelled.');
+    addLog('Booking cancelled by user', 'warn');
+    showToast('Booking cancelled.');
+
     const btn = document.getElementById('bookBtn');
-    btn.disabled = true;
-    btn.classList.add('loading');
-    btn.querySelector('.btn-text').textContent = 'Booking in progress…';
-
-    setStatus('running', 'Booking Now…', 'Looking for tee times on Saturday morning…');
-    addLog('Manual booking triggered', 'info');
-    showToast('Booking started — this may take 30–60 seconds.');
-
-    try {
-      // This hits the Flask API running on the same Oracle server
-      const resp = await fetch('/run', { method: 'POST' });
-      const data = await resp.json();
-
-      if (data.success) {
-        setStatus('idle', 'Tee Time Booked! ⛳', `${data.time} on Saturday — confirmation sent to your phone.`);
-        addLog(`✅ BOOKED: ${data.time} on ${data.date}`, 'ok');
-        updateResult(
-          new Date().toLocaleString(),
-          data.date,
-          '✅ Booked!',
-          data.time
-        );
-        showToast(`Booked! ${data.time} on Saturday`);
-      } else {
-        setStatus('error', 'No Times Available', data.message || 'Could not secure a tee time. Try the course website.');
-        addLog('No tee time booked: ' + (data.message || 'unknown reason'), 'warn');
-        updateResult(new Date().toLocaleString(), data.date || '—', '❌ Not booked', '—');
-        showToast(data.message || 'Could not book a tee time.', true);
-      }
-    } catch (err) {
-      setStatus('error', 'Connection Error', 'Could not reach the booking server. Try again.');
-      addLog('Server connection error: ' + err.message, 'err');
-      showToast('Could not reach server.', true);
-    } finally {
-      btn.disabled = false;
-      btn.classList.remove('loading');
-      btn.querySelector('.btn-text').textContent = '⛳ Book Right Now (Manual)';
-    }
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.querySelector('.btn-text').textContent = '⛳ Book Right Now (Manual)';
+  } catch (err) {
+    addLog('Cancel error: ' + err.message, 'err');
+    showToast(err.message, true);
   }
+}
 
-  // ── Poll server for latest status on page load ─────────────────────────────
-  async function loadStatus() {
-    try {
-      const resp = await fetch('/status');
-      const data = await resp.json();
-      if (data.last_run) {
-        updateResult(data.last_run.ran_at, data.last_run.target_date,
-                     data.last_run.result, data.last_run.time_booked);
-        if (data.last_run.result && data.last_run.result.includes('Booked')) {
-          setStatus('idle', 'Tee Time Booked! ⛳',
-            `Last booked: ${data.last_run.time_booked} on ${data.last_run.target_date}`);
-        }
-      }
-      if (data.log_lines) {
-        const box = document.getElementById('logBox');
-        box.innerHTML = '';
-        data.log_lines.forEach(line => {
-          const div = document.createElement('div');
-          div.textContent = line;
-          box.appendChild(div);
-        });
-      }
-    } catch {
-      // Server might not be up yet — that's fine
+async function loadStatus() {
+  try {
+    const resp = await fetch('/api/tee-time/status');
+    const data = await resp.json();
+
+    if (data.running) {
+      setStatus('running', 'Booking Now…', 'A booking attempt is currently in progress.');
+      document.getElementById('bookBtn').disabled = true;
+      document.getElementById('cancelBtn').disabled = false;
+    } else {
+      document.getElementById('bookBtn').disabled = false;
+      document.getElementById('cancelBtn').disabled = true;
     }
+
+    if (data.current_config) {
+      document.getElementById('playersInput').value = data.current_config.players;
+      document.getElementById('holesInput').value = data.current_config.holes;
+      document.getElementById('earliestHourInput').value = data.current_config.earliest_hour;
+      document.getElementById('latestHourInput').value = data.current_config.latest_hour;
+    }
+
+    if (data.last_run && Object.keys(data.last_run).length) {
+      updateResult(
+        data.last_run.ran_at || '—',
+        data.last_run.target_date || data.last_run.date || '—',
+        data.last_run.result || '—',
+        data.last_run.time_booked || data.last_run.time || '—'
+      );
+    }
+
+    if (data.log_lines) {
+      const box = document.getElementById('logBox');
+      box.innerHTML = '';
+      data.log_lines.forEach(line => {
+        const div = document.createElement('div');
+        div.textContent = line;
+        box.appendChild(div);
+      });
+    }
+  } catch (err) {
+    console.error(err);
   }
+}
+
+setInterval(loadStatus, 3000);
   loadStatus();
 </script>
 </body>

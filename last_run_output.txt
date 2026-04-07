@@ -1,0 +1,20 @@
+2026-04-06 21:58:28,143  INFO  ============================================================
+2026-04-06 21:58:28,143  INFO  Booking job started.
+2026-04-06 21:58:28,143  INFO  Target date: 04-11-2026
+2026-04-06 21:58:28,144  INFO  ====== WebDriver manager ======
+2026-04-06 21:58:29,059  INFO  Get LATEST chromedriver version for google-chrome
+2026-04-06 21:58:29,394  INFO  Get LATEST chromedriver version for google-chrome
+2026-04-06 21:58:29,751  INFO  Driver [C:\Users\chris\.wdm\drivers\chromedriver\win64\146.0.7680.165\chromedriver-win32/chromedriver.exe] found in cache
+2026-04-06 21:58:30,318  INFO  Loading booking page for 04-11-2026...
+2026-04-06 21:58:34,578  INFO  Screenshot saved: C:\Users\chris\Documents\TeeTime\photos\01_loaded_215834.png
+2026-04-06 21:58:34,691  INFO  Set date to 04-11-2026
+2026-04-06 21:58:34,873  INFO  Screenshot saved: C:\Users\chris\Documents\TeeTime\photos\02_date_set_215834.png
+2026-04-06 21:58:34,899  INFO  Clicked '4' players button
+2026-04-06 21:58:35,018  INFO  Clicked 'Morning' filter
+2026-04-06 21:58:35,212  INFO  Screenshot saved: C:\Users\chris\Documents\TeeTime\photos\03_filtered_215835.png
+2026-04-06 21:58:35,212  INFO  Looking for eligible tee time cards...
+2026-04-06 21:58:35,231  INFO  Found 44 time-like elements
+2026-04-06 21:58:35,481  WARNING  No eligible tee times found in target window.
+2026-04-06 21:58:35,549  INFO  Screenshot saved: C:\Users\chris\Documents\TeeTime\photos\04_no_eligible_215835.png
+2026-04-06 21:58:38,139  INFO  Notification sent to: chrissor1soravilla@gmail.com
+2026-04-06 21:58:40,271  INFO  Browser closed.

@@ -6,6 +6,7 @@ import email
 import email.header
 import re
 import os
+import argparse
 
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
@@ -30,16 +31,35 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASSWORD")
 
+DEFAULT_PLAYERS = 4
+DEFAULT_HOLES = "18"
+DEFAULT_EARLIEST_HOUR = 8
+DEFAULT_LATEST_HOUR = 10
+DEFAULT_HEADLESS = True
+DEFAULT_CLICK_FINAL_BOOK_BUTTON = False
+
+HEADLESS = DEFAULT_HEADLESS
+CLICK_FINAL_BOOK_BUTTON = DEFAULT_CLICK_FINAL_BOOK_BUTTON
+
+TARGET_PLAYERS = DEFAULT_PLAYERS
+TARGET_HOLES = DEFAULT_HOLES
+EARLIEST_HOUR = DEFAULT_EARLIEST_HOUR
+LATEST_HOUR = DEFAULT_LATEST_HOUR
+
 COURSE_ID = "19757"
 SCHEDULE_ID = "2440"
 BASE_URL = "https://foreupsoftware.com"
 BOOKING_URL = f"{BASE_URL}/index.php/booking/{COURSE_ID}/{SCHEDULE_ID}"
 
-TARGET_PLAYERS = 4
-TARGET_HOLES = "18"
-EARLIEST_HOUR = 13   # 1 PM
-LATEST_HOUR = 18     # 4 PM
-HEADLESS = False
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--players", type=int, default=DEFAULT_PLAYERS)
+    parser.add_argument("--holes", type=str, default=DEFAULT_HOLES, choices=["9", "18"])
+    parser.add_argument("--earliest-hour", type=int, default=DEFAULT_EARLIEST_HOUR)
+    parser.add_argument("--latest-hour", type=int, default=DEFAULT_LATEST_HOUR)
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--click-final-book-button", action="store_true")
+    return parser.parse_args()
 
 # Safety switch: leave False so it DOES NOT actually book
 CLICK_FINAL_BOOK_BUTTON = False
@@ -68,17 +88,23 @@ def send_notification(subject: str, body: str):
     if not all([GMAIL_USER, GMAIL_APP_PASS, NOTIFY_EMAIL]):
         log.warning("Notification config incomplete — skipping.")
         return
+
+    recipients = [addr.strip() for addr in NOTIFY_EMAIL.split(",") if addr.strip()]
+    if not recipients:
+        log.warning("No valid notification recipients.")
+        return
+
     try:
         msg = MIMEText(body)
         msg["Subject"] = subject
         msg["From"] = GMAIL_USER
-        msg["To"] = NOTIFY_EMAIL
+        msg["To"] = ", ".join(recipients)
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_USER, GMAIL_APP_PASS)
-            server.sendmail(GMAIL_USER, NOTIFY_EMAIL, msg.as_string())
+            server.sendmail(GMAIL_USER, recipients, msg.as_string())
 
-        log.info(f"Notification sent to {NOTIFY_EMAIL}")
+        log.info(f"Notification sent to: {', '.join(recipients)}")
     except Exception as e:
         log.error(f"Failed to send notification: {e}")
 
@@ -199,7 +225,7 @@ def load_tee_times(driver, wait, saturday: str):
         date_input.send_keys(saturday)
         date_input.send_keys(Keys.ENTER)
         log.info(f"Set date to {saturday}")
-        time.sleep(2)
+        time.sleep(.1)
     except TimeoutException:
         log.warning("Date input not found by CSS — trying fallback")
         try:
@@ -210,7 +236,7 @@ def load_tee_times(driver, wait, saturday: str):
                 "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
                 date_input
             )
-            time.sleep(2)
+            time.sleep(.1)
         except Exception as e:
             log.error(f"Could not set date: {e}")
             raise
@@ -219,11 +245,13 @@ def load_tee_times(driver, wait, saturday: str):
 
     try:
         player_btn = wait.until(EC.element_to_be_clickable((
-            By.XPATH, "//button[normalize-space(text())='4'] | //a[normalize-space(text())='4']"
+            By.XPATH,
+            f"//button[normalize-space(text())='{TARGET_PLAYERS}'] | "
+            f"//a[normalize-space(text())='{TARGET_PLAYERS}']"
         )))
         driver.execute_script("arguments[0].click();", player_btn)
-        log.info("Clicked '4' players button")
-        time.sleep(1.5)
+        log.info(f"Clicked '{TARGET_PLAYERS}' players button")
+        time.sleep(0.1)
     except TimeoutException:
         log.warning("Could not find player '4' button — maybe already selected")
 
@@ -233,7 +261,7 @@ def load_tee_times(driver, wait, saturday: str):
         )
         driver.execute_script("arguments[0].click();", morning_btn)
         log.info("Clicked 'Morning' filter")
-        time.sleep(1.5)
+        time.sleep(0.1)
     except NoSuchElementException:
         log.warning("No 'Morning' button found — showing all times")
 
@@ -331,7 +359,7 @@ def login_when_prompted(driver, wait) -> bool:
                 "//button[contains(normalize-space(.), 'Log In')]"
             )))
             driver.execute_script("arguments[0].click();", login_link)
-            time.sleep(2)
+            time.sleep(.2)
             save_screenshot(driver, "07_login_link_clicked")
         except TimeoutException:
             log.warning("No nav login link found")
@@ -379,13 +407,14 @@ def login_when_prompted(driver, wait) -> bool:
         login_btn = wait.until(EC.element_to_be_clickable((
             By.XPATH, "//button[normalize-space(text())='Log In']"
         )))
+        time.sleep(1.5)
         driver.execute_script("arguments[0].click();", login_btn)
         log.info("Clicked 'Log In' button.")
     except TimeoutException:
         pass_field.send_keys(Keys.ENTER)
         log.info("Submitted via Enter key.")
 
-    time.sleep(4)
+    time.sleep(0.4)
     save_screenshot(driver, "09_after_login")
 
     page = driver.page_source.lower()
@@ -414,7 +443,9 @@ def find_booking_modal(driver, wait):
     raise TimeoutException("Could not find booking modal.")
 
 
-def select_holes(driver, wait, holes: str = TARGET_HOLES) -> bool:
+def select_holes(driver, wait, holes: str = None) -> bool:
+    if holes is None:
+        holes = TARGET_HOLES
     log.info(f"Selecting {holes} holes in booking modal...")
 
     try:
@@ -440,7 +471,7 @@ def select_holes(driver, wait, holes: str = TARGET_HOLES) -> bool:
                 driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
                 time.sleep(0.3)
                 driver.execute_script("arguments[0].click();", btn)
-                time.sleep(1)
+                time.sleep(.5)
                 log.info(f"Selected {holes} holes in modal")
                 save_screenshot(driver, f"10_holes_{holes}_selected")
                 return True
@@ -450,14 +481,6 @@ def select_holes(driver, wait, holes: str = TARGET_HOLES) -> bool:
     log.error("Could not select modal hole button.")
     save_screenshot(driver, "10_holes_not_selected")
     return False
-
-
-import time
-import imaplib
-import email
-import email.header
-import re
-from datetime import datetime
 
 
 def decode_header_value(value: str) -> str:
@@ -728,56 +751,6 @@ def enter_booking_code(driver, wait) -> bool:
         return False
 
 
-def enter_booking_code(driver, wait) -> bool:
-    log.info("Waiting for booking code email and entering it...")
-
-    code = get_booking_code_from_email(timeout_seconds=120, poll_every=5)
-    if not code:
-        save_screenshot(driver, "12_no_booking_code_found")
-        return False
-
-    try:
-        code_input = wait.until(EC.presence_of_element_located((By.ID, "reservation_confirmation_uid")))
-    except TimeoutException:
-        log.error("Could not find reservation_confirmation_uid input.")
-        save_screenshot(driver, "12_code_input_missing")
-        return False
-
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", code_input)
-        time.sleep(0.3)
-
-        wait.until(lambda d: code_input.is_displayed() and code_input.is_enabled())
-
-        driver.execute_script("""
-            arguments[0].removeAttribute('readonly');
-            arguments[0].removeAttribute('disabled');
-            arguments[0].focus();
-            arguments[0].value = '';
-            arguments[0].value = arguments[1];
-            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-            arguments[0].dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: '6' }));
-        """, code_input, code)
-
-        entered = code_input.get_attribute("value") or ""
-        log.info(f"Booking code field now contains: {entered}")
-
-        if entered != code:
-            log.error(f"Booking code did not stick. Expected {code}, got {entered}")
-            save_screenshot(driver, "12_code_value_mismatch")
-            return False
-
-        log.info("Entered booking code")
-        save_screenshot(driver, "12_code_entered")
-        return True
-
-    except Exception as e:
-        log.error(f"Could not enter booking code: {e}")
-        save_screenshot(driver, "12_code_entry_failed")
-        return False
-
-
 def find_book_time_button(driver, wait):
     modal = find_booking_modal(driver, wait)
 
@@ -835,20 +808,8 @@ def complete_until_final_step(driver, wait, time_str: str) -> bool:
     if not select_holes(driver, wait, TARGET_HOLES):
         return False
 
-    # Optional: click resend to force a fresh email
-    click_resend_code(driver, wait)
-
+    # Do NOT resend; just wait for the existing code email
     if not enter_booking_code(driver, wait):
-        return False
-
-    if CLICK_FINAL_BOOK_BUTTON:
-        if not click_confirm_button(driver, wait):
-            return False
-        page = driver.page_source.lower()
-        if any(kw in page for kw in ["confirmation", "confirmed", "receipt", "booked", "success", "thank you"]):
-            log.info(f"BOOKING CONFIRMED: {time_str}")
-            return True
-        log.warning("Booking confirmation not detected after clicking Book Time.")
         return False
 
     return preview_without_booking(driver, wait)
@@ -919,4 +880,13 @@ def run_booking_job():
 
 
 if __name__ == "__main__":
+    args = parse_args()
+
+    TARGET_PLAYERS = args.players
+    TARGET_HOLES = args.holes
+    EARLIEST_HOUR = args.earliest_hour
+    LATEST_HOUR = args.latest_hour
+    HEADLESS = args.headless
+    CLICK_FINAL_BOOK_BUTTON = args.click_final_book_button
+
     run_booking_job()
