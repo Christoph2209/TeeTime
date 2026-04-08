@@ -1,39 +1,84 @@
+"""
+Booking script for ForeUp-based golf course reservation systems, tailored for James Baird State Park.
+Features:
+- Selenium-based web automation to navigate the booking process
+- IMAP polling to retrieve booking confirmation codes from email
+- Configurable target date, time window, player count, and holes
+- Robust error handling with detailed logging and screenshots
+- Email notifications for success, failure, and key events
+Usage:
+- Set environment variables in a .env file or via CLI arguments for credentials and preferences
+- Run the script on a schedule (e.g., via cron) to attempt booking when slots open
+Environment Variables:
+- FOREUP_EMAIL: Your ForeUp account email
+- FOREUP_PASSWORD: Your ForeUp account password
+- GMAIL_USER: Gmail address for receiving booking code emails and sending notifications
+- GMAIL_APP_PASSWORD: App password for the Gmail account
+- NOTIFY_EMAIL: Comma-separated list of email addresses to notify about booking results
+CLI Arguments:
+--players: Number of players (default: 4)
+--holes: "9" or "18" (default: "18")
+--earliest-hour: Earliest tee time hour in 24h format (default: 8)
+--latest-hour: Latest tee time hour in 24h format (default: 10)
+--headless / --no-headless: Run browser in headless mode (default: headless)
+--click-final-book-button: Whether to click the final "Book Time" button (default: True)
+"""
+
+
 import argparse
 import email
 import email.header
 import imaplib
+import json
 import logging
 import os
 import re
 import smtplib
+import sys
 import time
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
-import sys
-
 from pathlib import Path
+
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.webdriver import WebDriver as ChromeWebDriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    BASE_DIR = Path(__file__).resolve().parent
+# =========================
+# Paths / PyInstaller-safe
+# =========================
 
-load_dotenv(BASE_DIR / ".env")
+def get_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
 
-FOREUP_EMAIL = os.getenv("FOREUP_EMAIL")
-FOREUP_PASSWORD = os.getenv("FOREUP_PASSWORD")
-NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL")
-GMAIL_USER = os.getenv("GMAIL_USER")
-GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASSWORD")
+
+BASE_DIR = get_base_dir()
+ENV_PATH = BASE_DIR / ".env"
+LOG_PATH = BASE_DIR / "booker.log"
+STATUS_PATH = BASE_DIR / "last_run.json"
+PHOTOS_DIR = BASE_DIR / "photos"
+
+load_dotenv(ENV_PATH)
+
+# =========================
+# Env / defaults
+# =========================
+
+FOREUP_EMAIL = os.getenv("FOREUP_EMAIL", "")
+FOREUP_PASSWORD = os.getenv("FOREUP_PASSWORD", "")
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
+GMAIL_USER = os.getenv("GMAIL_USER", "")
+GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASSWORD", "")
 
 COURSE_ID = "19757"
 SCHEDULE_ID = "2440"
@@ -59,11 +104,30 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)s  %(message)s",
     handlers=[
-        logging.FileHandler("booker.log"),
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
 log = logging.getLogger(__name__)
+
+
+# =========================
+# Helpers
+# =========================
+
+def write_status(result: str, target_date: str = "", time_booked: str = "", message: str = ""):
+    payload = {
+        "ran_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "target_date": target_date,
+        "result": result,
+        "time_booked": time_booked,
+        "message": message,
+    }
+    try:
+        with open(STATUS_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except Exception as e:
+        log.warning(f"Could not write status file: {e}")
 
 
 def parse_args():
@@ -76,20 +140,26 @@ def parse_args():
     parser.add_argument("--no-headless", dest="headless", action="store_false")
     parser.set_defaults(headless=DEFAULT_HEADLESS)
     parser.add_argument("--click-final-book-button", action="store_true")
+
+    # Optional CLI overrides
+    parser.add_argument("--foreup-email", type=str, default=None)
+    parser.add_argument("--foreup-password", type=str, default=None)
+    parser.add_argument("--gmail-user", type=str, default=None)
+    parser.add_argument("--gmail-app-password", type=str, default=None)
+    parser.add_argument("--notify-email", type=str, default=None)
+
     return parser.parse_args()
 
 
 def next_saturday() -> str:
     today = datetime.now()
 
-    # Saturday = 5
+    # Always target NEXT week's Saturday
     days_until_this_saturday = (5 - today.weekday()) % 7
-
-    # Always go to NEXT week's Saturday
-    if today.weekday() <= 5:  # Mon–Sat
+    if today.weekday() <= 5:   # Mon-Sat
         days_ahead = days_until_this_saturday + 7
-    else:  # Sunday
-        days_ahead = (5 - today.weekday()) % 7  # already next week
+    else:                      # Sunday
+        days_ahead = (5 - today.weekday()) % 7
 
     sat = today + timedelta(days=days_ahead)
     return sat.strftime("%m-%d-%Y")
@@ -123,15 +193,16 @@ def send_notification(subject: str, body: str):
 def save_screenshot(driver, name="debug"):
     if not DEBUG_SCREENSHOTS:
         return
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    photos_dir = os.path.join(script_dir, "photos")
-    os.makedirs(photos_dir, exist_ok=True)
-    path = os.path.join(photos_dir, f"{name}_{datetime.now().strftime('%H%M%S')}.png")
-    driver.save_screenshot(path)
-    log.info(f"Screenshot saved: {path}")
+    try:
+        PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+        path = PHOTOS_DIR / f"{name}_{datetime.now().strftime('%H%M%S')}.png"
+        driver.save_screenshot(str(path))
+        log.info(f"Screenshot saved: {path}")
+    except Exception as e:
+        log.warning(f"Could not save screenshot: {e}")
 
 
-def make_driver() -> webdriver.Chrome:
+def make_driver() -> ChromeWebDriver:
     opts = Options()
     if HEADLESS:
         opts.add_argument("--headless=new")
@@ -146,12 +217,22 @@ def make_driver() -> webdriver.Chrome:
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
     )
 
-    driver = webdriver.Chrome(options=opts)
+    log.info("Starting Chrome WebDriver...")
+
+    chromedriver_path = BASE_DIR / "chromedriver.exe"
+    if chromedriver_path.exists():
+        log.info(f"Using local ChromeDriver: {chromedriver_path}")
+        service = Service(str(chromedriver_path))
+        driver = ChromeWebDriver(service=service, options=opts)
+    else:
+        log.info("No local chromedriver.exe found, using Selenium Manager/default resolution.")
+        driver = ChromeWebDriver(options=opts)
+
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
+    log.info("Chrome WebDriver started successfully.")
     return driver
-
 
 def decode_header_value(value: str) -> str:
     if not value:
@@ -675,6 +756,12 @@ def run_booking_job():
     saturday = next_saturday()
     log.info(f"Target date: {saturday}")
 
+    if not FOREUP_EMAIL or not FOREUP_PASSWORD:
+        msg = "Missing ForeUp credentials."
+        log.error(msg)
+        write_status("missing_credentials", saturday, "", msg)
+        return
+
     driver = make_driver()
     wait = WebDriverWait(driver, 10)
 
@@ -683,53 +770,59 @@ def run_booking_job():
 
         chosen_time = select_tee_time(driver, wait)
         if not chosen_time:
-            send_notification(
-                "Tee time bot: no slots",
-                f"No tee times between target hours on {saturday} for {TARGET_PLAYERS} players."
-            )
+            msg = f"No tee times between target hours on {saturday} for {TARGET_PLAYERS} players."
+            send_notification("Tee time bot: no slots", msg)
+            write_status("no_slots", saturday, "", msg)
             return
 
         if not login_when_prompted(driver, wait):
-            send_notification(
-                "Tee time bot: login failed",
-                f"Could not log in for {saturday}. Check screenshots."
-            )
+            msg = f"Could not log in for {saturday}. Check screenshots/log."
+            send_notification("Tee time bot: login failed", msg)
+            write_status("login_failed", saturday, chosen_time, msg)
             return
 
         success = complete_until_final_step(driver, wait, chosen_time)
 
         if success:
             if CLICK_FINAL_BOOK_BUTTON:
-                send_notification(
-                    "⛳ Tee time booked!",
-                    f"James Baird\nDate: {saturday}\nTime: {chosen_time}\nPlayers: {TARGET_PLAYERS}\nHoles: {TARGET_HOLES}"
+                msg = (
+                    f"James Baird\n"
+                    f"Date: {saturday}\n"
+                    f"Time: {chosen_time}\n"
+                    f"Players: {TARGET_PLAYERS}\n"
+                    f"Holes: {TARGET_HOLES}"
                 )
+                send_notification("⛳ Tee time booked!", msg)
                 log.info("BOOKING CONFIRMED: %s", chosen_time)
-                log.info("Job complete — booked!")
+                write_status("booked", saturday, chosen_time, msg)
             else:
-                send_notification(
-                    "Tee time bot: reached final step",
+                msg = (
                     f"Reached final Book Time button without clicking it.\n"
                     f"Date: {saturday}\n"
                     f"Time: {chosen_time}\n"
                     f"Players: {TARGET_PLAYERS}\n"
                     f"Holes: {TARGET_HOLES}"
                 )
-                log.info("Job complete — reached final step without booking.")
+                send_notification("Tee time bot: reached final step", msg)
+                write_status("reached_final_step", saturday, chosen_time, msg)
         else:
-            send_notification(
-                "Tee time bot: not completed",
-                f"Could not reach the final step for {saturday}. Try manually."
-            )
+            msg = f"Could not reach the final step for {saturday}. Try manually."
+            send_notification("Tee time bot: not completed", msg)
+            write_status("not_completed", saturday, chosen_time, msg)
 
     except Exception as e:
+        msg = str(e)
         log.error(f"Unexpected error: {e}", exc_info=True)
         save_screenshot(driver, "error")
-        send_notification("Tee time bot: error", str(e))
+        send_notification("Tee time bot: error", msg)
+        write_status("error", saturday, "", msg)
     finally:
-        if not HEADLESS:
-            time.sleep(5)
-        driver.quit()
+        try:
+            if not HEADLESS:
+                time.sleep(5)
+            driver.quit()
+        except Exception:
+            pass
         log.info("Browser closed.")
 
 
@@ -742,5 +835,16 @@ if __name__ == "__main__":
     LATEST_HOUR = args.latest_hour
     HEADLESS = args.headless
     CLICK_FINAL_BOOK_BUTTON = args.click_final_book_button
+
+    if args.foreup_email:
+        FOREUP_EMAIL = args.foreup_email
+    if args.foreup_password:
+        FOREUP_PASSWORD = args.foreup_password
+    if args.gmail_user:
+        GMAIL_USER = args.gmail_user
+    if args.gmail_app_password:
+        GMAIL_APP_PASS = args.gmail_app_password
+    if args.notify_email:
+        NOTIFY_EMAIL = args.notify_email
 
     run_booking_job()
