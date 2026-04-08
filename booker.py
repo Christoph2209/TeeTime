@@ -9,7 +9,9 @@ import smtplib
 import time
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
+import sys
 
+from pathlib import Path
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
@@ -20,7 +22,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
-load_dotenv()
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
+load_dotenv(BASE_DIR / ".env")
 
 FOREUP_EMAIL = os.getenv("FOREUP_EMAIL")
 FOREUP_PASSWORD = os.getenv("FOREUP_PASSWORD")
@@ -38,7 +45,7 @@ DEFAULT_HOLES = "18"
 DEFAULT_EARLIEST_HOUR = 8
 DEFAULT_LATEST_HOUR = 10
 DEFAULT_HEADLESS = True
-DEFAULT_CLICK_FINAL_BOOK_BUTTON = False
+DEFAULT_CLICK_FINAL_BOOK_BUTTON = True
 DEBUG_SCREENSHOTS = False
 
 HEADLESS = DEFAULT_HEADLESS

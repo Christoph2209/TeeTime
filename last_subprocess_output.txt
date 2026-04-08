@@ -1,12 +1,21 @@
 
-2026-04-07 15:36:09,749  INFO  ============================================================
-2026-04-07 15:36:09,750  INFO  Booking job started.
-2026-04-07 15:36:09,750  INFO  Target date: 04-18-2026
-2026-04-07 15:36:10,384  INFO  Loading booking page for 04-18-2026...
-2026-04-07 15:36:12,254  INFO  Set date to 04-18-2026
-2026-04-07 15:36:12,284  INFO  Clicked '4' players button
-2026-04-07 15:36:13,284  INFO  Looking for eligible tee time cards...
-2026-04-07 15:36:13,301  INFO  Found 44 time-like elements
-2026-04-07 15:36:13,501  WARNING  No eligible tee times found in target window.
-2026-04-07 15:36:13,501  WARNING  Notification config incomplete — skipping.
-2026-04-07 15:36:15,634  INFO  Browser closed.
+2026-04-07 18:18:02,654  INFO  ============================================================
+2026-04-07 18:18:02,654  INFO  Booking job started.
+2026-04-07 18:18:02,654  INFO  Target date: 04-18-2026
+2026-04-07 18:18:03,810  INFO  Loading booking page for 04-18-2026...
+2026-04-07 18:18:05,887  INFO  Set date to 04-18-2026
+2026-04-07 18:18:05,920  INFO  Clicked '4' players button
+2026-04-07 18:18:06,921  INFO  Looking for eligible tee time cards...
+2026-04-07 18:18:06,942  INFO  Found 68 time-like elements
+2026-04-07 18:18:07,169  INFO  Eligible time found: 9:00am
+2026-04-07 18:18:07,487  INFO  Clicked 'Log In' button.
+2026-04-07 18:18:09,026  INFO  Login step appears successful.
+2026-04-07 18:18:09,068  INFO  Selected 18 holes in modal
+2026-04-07 18:18:09,068  INFO  Waiting for booking code email and entering it...
+2026-04-07 18:18:09,831  INFO  Booking code found in email.
+2026-04-07 18:18:09,891  INFO  Entered booking code
+2026-04-07 18:18:09,937  INFO  Clicked Book Time button
+2026-04-07 18:18:09,938  WARNING  Notification config incomplete — skipping.
+2026-04-07 18:18:09,938  INFO  BOOKING CONFIRMED: 9:00am
+2026-04-07 18:18:09,938  INFO  Job complete — booked!
+2026-04-07 18:18:12,065  INFO  Browser closed.
